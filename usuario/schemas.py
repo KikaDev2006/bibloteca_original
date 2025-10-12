@@ -22,6 +22,12 @@ class UsuarioUpdate(Schema):
     contraseña: str = None
 
 
+class SuperUsuarioIn(Schema):
+    nombre_completo: str
+    email: str
+    contraseña: str
+
+
 class LoginIn(Schema):
     email: str
     contraseña: str

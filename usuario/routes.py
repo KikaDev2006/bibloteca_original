@@ -1,11 +1,11 @@
 from typing import List
 from django.shortcuts import get_object_or_404
 from django.http import HttpResponse
-from django.core import signing
+from django.contrib.auth.models import User
 from ninja import Router
 
 from .models import Usuario
-from .schemas import UsuarioIn, UsuarioOut, UsuarioUpdate, LoginIn, LoginOut
+from .schemas import UsuarioIn, UsuarioOut, UsuarioUpdate, LoginIn, LoginOut, SuperUsuarioIn
 from .auth import token_auth
 
 
@@ -103,5 +103,44 @@ def delete_usuario(request, usuario_id: int):
 
 
 
+@router.post("/crear-superusuario", response={200: dict, 403: dict})
+def crear_superusuario(request, payload: SuperUsuarioIn):
+    """
+    Crea un superusuario solo si no existe ninguno en el sistema.
+    """
+    # Verificar si ya existe un superusuario
+    if User.objects.filter(is_superuser=True).exists():
+        return 403, {
+            "success": False,
+            "message": "Ya existe un superusuario en el sistema"
+        }
 
+    # Crear el superusuario
+    try:
+        superusuario = User.objects.create_user(
+            username=payload.email,  # Usamos email como username
+            email=payload.email,
+            password=payload.contraseña,
+            first_name=payload.nombre_completo.split()[0] if payload.nombre_completo else "",
+            last_name=" ".join(payload.nombre_completo.split()[1:]) if len(payload.nombre_completo.split()) > 1 else ""
+        )
+        superusuario.is_superuser = True
+        superusuario.is_staff = True
+        superusuario.save()
 
+        return 200, {
+            "success": True,
+            "message": f"Superusuario {superusuario.username} creado exitosamente",
+            "usuario": {
+                "id": superusuario.id,
+                "username": superusuario.username,
+                "email": superusuario.email,
+                "is_superuser": superusuario.is_superuser,
+                "is_staff": superusuario.is_staff
+            }
+        }
+    except Exception as e:
+        return 200, {
+            "success": False,
+            "message": f"Error al crear superusuario: {str(e)}"
+        }
