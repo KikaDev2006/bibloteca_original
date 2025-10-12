@@ -18,12 +18,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Cargar variables de entorno desde .env si existe
 env_file = BASE_DIR / '.env'
+print(f"🔍 Buscando archivo de configuración: {env_file}")
 if env_file.exists():
+    print("✅ Archivo .env encontrado, cargando variables de entorno...")
     with open(env_file) as f:
         for line in f:
             if line.strip() and not line.startswith('#'):
                 key, value = line.strip().split('=', 1)
                 os.environ.setdefault(key, value)
+                print(f"   📋 {key}=[CONFIGURADO]")
+    print(f"✅ Variables de entorno cargadas desde {env_file}")
+else:
+    print("⚠️ Archivo .env no encontrado, usando configuración por defecto")
+
+# Verificar configuración de base de datos
+database_url = os.getenv('DATABASE_URL')
+if database_url:
+    print(f"🗄️ Base de datos: PostgreSQL configurada")
+    print(f"   📋 DATABASE_URL={database_url[:50]}...")
+else:
+    print("🗄️ Base de datos: SQLite (por defecto)")
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-hv6qzft(ynu5te3iztmrw-fncg+su%o9ps-b0#j-0c^h0%)9y1'
