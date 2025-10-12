@@ -26,9 +26,11 @@ class LibroOut(Schema):
     created_at: datetime
     updated_at: datetime
     ultima_pagina_leida: Optional[int] = None
+    ultima_pagina_leida_id: Optional[int] = None
     esta_terminado: Optional[bool] = None
     total_paginas: Optional[int] = None
     es_favorito: Optional[bool] = None
     pendiente_leer: Optional[bool] = None
+    calificacion_promedio: Optional[float] = None
     
 

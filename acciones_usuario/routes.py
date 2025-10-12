@@ -1,15 +1,30 @@
-from typing import List
+from typing import List, Optional
 from django.shortcuts import get_object_or_404
 from django.http import HttpResponse
 from ninja import Router
 
 from .models import Acciones_usuario
 from libro.models import Libro
+from pagina.models import Pagina
 from usuario.auth import token_auth
 from .schemas import AccionUsuarioIn, AccionUsuarioUpdate, AccionUsuarioOut
 
 
 router = Router(tags=["acciones_usuario"])
+
+
+def obtener_numero_pagina(libro_id: int, pagina_id: int) -> Optional[int]:
+    """Obtiene el número de página (posición) dado su ID"""
+    if not pagina_id:
+        return None
+    
+    paginas = list(Pagina.objects.filter(libro_id=libro_id).order_by('id').values_list('id', flat=True))
+    
+    try:
+        # El número de página es 1-indexed
+        return paginas.index(pagina_id) + 1
+    except ValueError:
+        return None
 
 
 @router.get("/", response=List[AccionUsuarioOut], auth=token_auth)
@@ -33,7 +48,8 @@ def list_acciones_usuario(request):
             libro_id=accion.libro_id,
             libro_nombre=accion.libro.nombre,
             es_favorito=accion.es_favorito,
-            ultima_pagina_leida=accion.ultima_pagina_leida,
+            ultima_pagina_leida=obtener_numero_pagina(accion.libro_id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None,
+            ultima_pagina_leida_id=accion.ultima_pagina_leida_id,
             pendiente_leer=accion.pendiente_leer,
             calificacion=accion.calificacion,
             created_at=accion.created_at,
@@ -67,7 +83,8 @@ def get_accion_by_libro(request, libro_id: int):
         libro_id=accion.libro_id,
         libro_nombre=accion.libro.nombre,
         es_favorito=accion.es_favorito,
-        ultima_pagina_leida=accion.ultima_pagina_leida,
+        ultima_pagina_leida=obtener_numero_pagina(accion.libro_id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None,
+        ultima_pagina_leida_id=accion.ultima_pagina_leida_id,
         pendiente_leer=accion.pendiente_leer,
         calificacion=accion.calificacion,
         created_at=accion.created_at,
@@ -93,7 +110,7 @@ def create_accion_usuario(request, payload: AccionUsuarioIn):
         usuario_id=usuario_id,
         libro_id=payload.libro_id,
         es_favorito=payload.es_favorito,
-        ultima_pagina_leida=payload.ultima_pagina_leida,
+        ultima_pagina_leida_id=payload.ultima_pagina_leida_id,
         pendiente_leer=payload.pendiente_leer,
         calificacion=payload.calificacion,
     )
@@ -106,7 +123,8 @@ def create_accion_usuario(request, payload: AccionUsuarioIn):
         libro_id=accion.libro_id,
         libro_nombre=libro.nombre,
         es_favorito=accion.es_favorito,
-        ultima_pagina_leida=accion.ultima_pagina_leida,
+        ultima_pagina_leida=obtener_numero_pagina(accion.libro_id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None,
+        ultima_pagina_leida_id=accion.ultima_pagina_leida_id,
         pendiente_leer=accion.pendiente_leer,
         calificacion=accion.calificacion,
         created_at=accion.created_at,
@@ -132,8 +150,8 @@ def update_accion_by_libro(request, libro_id: int, payload: AccionUsuarioUpdate)
     # Actualizar solo los campos proporcionados
     if payload.es_favorito is not None:
         accion.es_favorito = payload.es_favorito
-    if payload.ultima_pagina_leida is not None:
-        accion.ultima_pagina_leida = payload.ultima_pagina_leida
+    if payload.ultima_pagina_leida_id is not None:
+        accion.ultima_pagina_leida_id = payload.ultima_pagina_leida_id
     if payload.pendiente_leer is not None:
         accion.pendiente_leer = payload.pendiente_leer
     if payload.calificacion is not None:
@@ -147,7 +165,8 @@ def update_accion_by_libro(request, libro_id: int, payload: AccionUsuarioUpdate)
         libro_id=accion.libro_id,
         libro_nombre=libro.nombre,
         es_favorito=accion.es_favorito,
-        ultima_pagina_leida=accion.ultima_pagina_leida,
+        ultima_pagina_leida=obtener_numero_pagina(accion.libro_id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None,
+        ultima_pagina_leida_id=accion.ultima_pagina_leida_id,
         pendiente_leer=accion.pendiente_leer,
         calificacion=accion.calificacion,
         created_at=accion.created_at,

@@ -1,6 +1,7 @@
 from typing import List, Optional
 from django.shortcuts import get_object_or_404
 from django.http import HttpResponse
+from django.db.models import Avg, Q
 from ninja import Router, File, Form
 from ninja.files import UploadedFile
 from functools import wraps
@@ -14,6 +15,30 @@ from acciones_usuario.models import Acciones_usuario
 
 
 router = Router(tags=["libros"])
+
+
+def calcular_calificacion_promedio(libro_id: int) -> Optional[float]:
+    """Calcula la calificación promedio de un libro excluyendo calificaciones de 0"""
+    resultado = Acciones_usuario.objects.filter(
+        libro_id=libro_id,
+        calificacion__gt=0  # Solo calificaciones mayores a 0
+    ).aggregate(promedio=Avg('calificacion'))
+    
+    return round(resultado['promedio'], 2) if resultado['promedio'] is not None else None
+
+
+def obtener_numero_pagina_por_id(libro_id: int, pagina_id: int) -> Optional[int]:
+    """Obtiene el número de página (posición) dado su ID"""
+    if not pagina_id:
+        return None
+    
+    paginas = list(Pagina.objects.filter(libro_id=libro_id).order_by('id').values_list('id', flat=True))
+    
+    try:
+        # El número de página es 1-indexed
+        return paginas.index(pagina_id) + 1
+    except ValueError:
+        return None
 
 
 def require_ownership(func):
@@ -53,6 +78,7 @@ def list_libros(request):
         if libro.es_publico or (usuario_id and libro.usuario_id == usuario_id):
             # Obtener información de acciones de usuario si está autenticado
             ultima_pagina_leida = None
+            ultima_pagina_leida_id = None
             esta_terminado = None
             total_paginas = None
             
@@ -62,11 +88,15 @@ def list_libros(request):
             if usuario_id:
                 accion = Acciones_usuario.objects.filter(usuario_id=usuario_id, libro_id=libro.id).first()
                 if accion:
-                    ultima_pagina_leida = accion.ultima_pagina_leida
+                    ultima_pagina_leida_id = accion.ultima_pagina_leida_id
+                    ultima_pagina_leida = obtener_numero_pagina_por_id(libro.id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None
                     total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
-                    esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 else False
+                    esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 and ultima_pagina_leida else False
                     es_favorito = accion.es_favorito
                     pendiente_leer = accion.pendiente_leer
+            
+            # Calcular calificación promedio
+            calificacion_promedio = calcular_calificacion_promedio(libro.id)
             
             result.append(
                 LibroOut(
@@ -83,12 +113,75 @@ def list_libros(request):
                     created_at=libro.created_at,
                     updated_at=libro.updated_at,
                     ultima_pagina_leida=ultima_pagina_leida,
+                    ultima_pagina_leida_id=ultima_pagina_leida_id,
                     esta_terminado=esta_terminado,
                     total_paginas=total_paginas,
                     es_favorito=es_favorito,
                     pendiente_leer=pendiente_leer,
+                    calificacion_promedio=calificacion_promedio,
                 )
             )
+    return result
+
+
+@router.get("/todos-autenticado", response=List[LibroOut], auth=token_auth)
+def list_libros_autenticado(request):
+    """Obtiene todos los libros públicos con las acciones del usuario autenticado"""
+    usuario_id = request.auth.get('uid')
+    if not usuario_id:
+        return HttpResponse("No autenticado", status=401)
+    
+    libros = (
+        Libro.objects.select_related("genero", "usuario")
+        .filter(es_publico=True)
+        .order_by("id")
+    )
+    
+    result = []
+    for libro in libros:
+        # Obtener información de acciones de usuario
+        accion = Acciones_usuario.objects.filter(usuario_id=usuario_id, libro_id=libro.id).first()
+        ultima_pagina_leida = None
+        ultima_pagina_leida_id = None
+        esta_terminado = None
+        total_paginas = None
+        es_favorito = None
+        pendiente_leer = None
+        
+        if accion:
+            ultima_pagina_leida_id = accion.ultima_pagina_leida_id
+            ultima_pagina_leida = obtener_numero_pagina_por_id(libro.id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None
+            total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
+            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 and ultima_pagina_leida else False
+            es_favorito = accion.es_favorito
+            pendiente_leer = accion.pendiente_leer
+        
+        # Calcular calificación promedio
+        calificacion_promedio = calcular_calificacion_promedio(libro.id)
+        
+        result.append(
+            LibroOut(
+                id=libro.id,
+                nombre=libro.nombre,
+                version=libro.version,
+                genero_id=libro.genero_id,
+                genero=(libro.genero.genero if libro.genero_id else None),
+                color_portada=libro.color_portada,
+                imagen_portada=libro.imagen_portada.url if libro.imagen_portada else None,
+                es_publico=libro.es_publico,
+                usuario_id=libro.usuario_id,
+                autor=libro.usuario.nombre_completo,
+                created_at=libro.created_at,
+                updated_at=libro.updated_at,
+                ultima_pagina_leida=ultima_pagina_leida,
+                ultima_pagina_leida_id=ultima_pagina_leida_id,
+                esta_terminado=esta_terminado,
+                total_paginas=total_paginas,
+                es_favorito=es_favorito,
+                pendiente_leer=pendiente_leer,
+                calificacion_promedio=calificacion_promedio,
+            )
+        )
     return result
 
 
@@ -110,6 +203,7 @@ def mis_libros(request):
         # Obtener información de acciones de usuario
         accion = Acciones_usuario.objects.filter(usuario_id=usuario_id, libro_id=libro.id).first()
         ultima_pagina_leida = None
+        ultima_pagina_leida_id = None
         esta_terminado = None
         total_paginas = None
         
@@ -117,11 +211,15 @@ def mis_libros(request):
         pendiente_leer = None
         
         if accion:
-            ultima_pagina_leida = accion.ultima_pagina_leida
+            ultima_pagina_leida_id = accion.ultima_pagina_leida_id
+            ultima_pagina_leida = obtener_numero_pagina_por_id(libro.id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None
             total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
-            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 else False
+            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 and ultima_pagina_leida else False
             es_favorito = accion.es_favorito
             pendiente_leer = accion.pendiente_leer
+        
+        # Calcular calificación promedio
+        calificacion_promedio = calcular_calificacion_promedio(libro.id)
         
         result.append(
             LibroOut(
@@ -138,10 +236,12 @@ def mis_libros(request):
                 created_at=libro.created_at,
                 updated_at=libro.updated_at,
                 ultima_pagina_leida=ultima_pagina_leida,
+                ultima_pagina_leida_id=ultima_pagina_leida_id,
                 esta_terminado=esta_terminado,
                 total_paginas=total_paginas,
                 es_favorito=es_favorito,
                 pendiente_leer=pendiente_leer,
+                calificacion_promedio=calificacion_promedio,
             )
         )
     return result
@@ -162,6 +262,7 @@ def get_libro(request, libro_id: int):
     
     # Obtener información de acciones de usuario si está autenticado
     ultima_pagina_leida = None
+    ultima_pagina_leida_id = None
     esta_terminado = None
     total_paginas = None
     
@@ -171,11 +272,15 @@ def get_libro(request, libro_id: int):
     if usuario_id:
         accion = Acciones_usuario.objects.filter(usuario_id=usuario_id, libro_id=libro.id).first()
         if accion:
-            ultima_pagina_leida = accion.ultima_pagina_leida
+            ultima_pagina_leida_id = accion.ultima_pagina_leida_id
+            ultima_pagina_leida = obtener_numero_pagina_por_id(libro.id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None
             total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
-            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 else False
+            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 and ultima_pagina_leida else False
             es_favorito = accion.es_favorito
             pendiente_leer = accion.pendiente_leer
+    
+    # Calcular calificación promedio
+    calificacion_promedio = calcular_calificacion_promedio(libro.id)
     
     return LibroOut(
         id=libro.id,
@@ -191,10 +296,12 @@ def get_libro(request, libro_id: int):
         created_at=libro.created_at,
         updated_at=libro.updated_at,
         ultima_pagina_leida=ultima_pagina_leida,
+        ultima_pagina_leida_id=ultima_pagina_leida_id,
         esta_terminado=esta_terminado,
         total_paginas=total_paginas,
         es_favorito=es_favorito,
         pendiente_leer=pendiente_leer,
+        calificacion_promedio=calificacion_promedio,
     )
 
 
@@ -228,6 +335,7 @@ def create_libro(
     # Obtener información de acciones de usuario
     accion = Acciones_usuario.objects.filter(usuario_id=usuario_id, libro_id=libro.id).first()
     ultima_pagina_leida = None
+    ultima_pagina_leida_id = None
     esta_terminado = None
     total_paginas = None
     es_favorito = None
@@ -235,10 +343,14 @@ def create_libro(
     
     if accion:
         ultima_pagina_leida = accion.ultima_pagina_leida
+        ultima_pagina_leida_id = obtener_pagina_id_por_numero(libro.id, accion.ultima_pagina_leida)
         total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
         esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 else False
         es_favorito = accion.es_favorito
         pendiente_leer = accion.pendiente_leer
+    
+    # Calcular calificación promedio
+    calificacion_promedio = calcular_calificacion_promedio(libro.id)
     
     return LibroOut(
         id=libro.id,
@@ -254,10 +366,12 @@ def create_libro(
         created_at=libro.created_at,
         updated_at=libro.updated_at,
         ultima_pagina_leida=ultima_pagina_leida,
+        ultima_pagina_leida_id=ultima_pagina_leida_id,
         esta_terminado=esta_terminado,
         total_paginas=total_paginas,
         es_favorito=es_favorito,
         pendiente_leer=pendiente_leer,
+        calificacion_promedio=calificacion_promedio,
     )
 
 
@@ -293,6 +407,7 @@ def update_libro(
     usuario_id = request.auth.get('uid')
     accion = Acciones_usuario.objects.filter(usuario_id=usuario_id, libro_id=libro.id).first()
     ultima_pagina_leida = None
+    ultima_pagina_leida_id = None
     esta_terminado = None
     total_paginas = None
     es_favorito = None
@@ -300,10 +415,14 @@ def update_libro(
     
     if accion:
         ultima_pagina_leida = accion.ultima_pagina_leida
+        ultima_pagina_leida_id = obtener_pagina_id_por_numero(libro.id, accion.ultima_pagina_leida)
         total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
         esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 else False
         es_favorito = accion.es_favorito
         pendiente_leer = accion.pendiente_leer
+    
+    # Calcular calificación promedio
+    calificacion_promedio = calcular_calificacion_promedio(libro.id)
     
     return LibroOut(
         id=libro.id,
@@ -319,10 +438,12 @@ def update_libro(
         created_at=libro.created_at,
         updated_at=libro.updated_at,
         ultima_pagina_leida=ultima_pagina_leida,
+        ultima_pagina_leida_id=ultima_pagina_leida_id,
         esta_terminado=esta_terminado,
         total_paginas=total_paginas,
         es_favorito=es_favorito,
         pendiente_leer=pendiente_leer,
+        calificacion_promedio=calificacion_promedio,
     )
 
 
@@ -373,7 +494,10 @@ def list_favoritos(request):
         # Verificar que el libro es público o el usuario es el autor
         if libro.es_publico or libro.usuario_id == usuario_id:
             total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
-            esta_terminado = accion.ultima_pagina_leida >= total_paginas if total_paginas > 0 else False
+            ultima_pagina_leida_id = accion.ultima_pagina_leida_id
+            ultima_pagina_leida = obtener_numero_pagina_por_id(libro.id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None
+            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 and ultima_pagina_leida else False
+            calificacion_promedio = calcular_calificacion_promedio(libro.id)
             
             result.append(
                 LibroOut(
@@ -389,11 +513,13 @@ def list_favoritos(request):
                     autor=libro.usuario.nombre_completo,
                     created_at=libro.created_at,
                     updated_at=libro.updated_at,
-                    ultima_pagina_leida=accion.ultima_pagina_leida,
+                    ultima_pagina_leida=ultima_pagina_leida,
+                    ultima_pagina_leida_id=ultima_pagina_leida_id,
                     esta_terminado=esta_terminado,
                     total_paginas=total_paginas,
                     es_favorito=accion.es_favorito,
                     pendiente_leer=accion.pendiente_leer,
+                    calificacion_promedio=calificacion_promedio,
                 )
             )
     return result
@@ -420,7 +546,10 @@ def list_pendientes(request):
         # Verificar que el libro es público o el usuario es el autor
         if libro.es_publico or libro.usuario_id == usuario_id:
             total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
-            esta_terminado = accion.ultima_pagina_leida >= total_paginas if total_paginas > 0 else False
+            ultima_pagina_leida_id = accion.ultima_pagina_leida_id
+            ultima_pagina_leida = obtener_numero_pagina_por_id(libro.id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None
+            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 and ultima_pagina_leida else False
+            calificacion_promedio = calcular_calificacion_promedio(libro.id)
             
             result.append(
                 LibroOut(
@@ -436,11 +565,13 @@ def list_pendientes(request):
                     autor=libro.usuario.nombre_completo,
                     created_at=libro.created_at,
                     updated_at=libro.updated_at,
-                    ultima_pagina_leida=accion.ultima_pagina_leida,
+                    ultima_pagina_leida=ultima_pagina_leida,
+                    ultima_pagina_leida_id=ultima_pagina_leida_id,
                     esta_terminado=esta_terminado,
                     total_paginas=total_paginas,
                     es_favorito=accion.es_favorito,
                     pendiente_leer=accion.pendiente_leer,
+                    calificacion_promedio=calificacion_promedio,
                 )
             )
     return result
