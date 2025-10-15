@@ -43,16 +43,20 @@ else:
 SECRET_KEY = 'django-insecure-hv6qzft(ynu5te3iztmrw-fncg+su%o9ps-b0#j-0c^h0%)9y1'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-# SECURITY WARNING: only allow specific hosts in production!
-ALLOWED_HOSTS = ['bibloteca-original.onrender.com', 'www.bibloteca-original.onrender.com']
+# ALLOWED_HOSTS configuration
+if DEBUG:
+    ALLOWED_HOSTS = ['*']
+else:
+    ALLOWED_HOSTS = ['bibloteca-original.onrender.com', 'www.bibloteca-original.onrender.com']
 
-# CSRF Trusted Origins for production
-CSRF_TRUSTED_ORIGINS = [
-    'https://bibloteca-original.onrender.com',
-    'https://www.bibloteca-original.onrender.com',
-]
+# CSRF Trusted Origins configuration
+if not DEBUG:
+    CSRF_TRUSTED_ORIGINS = [
+        'https://bibloteca-original.onrender.com',
+        'https://www.bibloteca-original.onrender.com',
+    ]
 
 
 # Application definition
