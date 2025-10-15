@@ -1,10 +1,13 @@
 from typing import List, Optional
 from django.shortcuts import get_object_or_404
-from django.http import HttpResponse
+from django.http import HttpResponse, FileResponse
 from django.db.models import Avg, Q
 from ninja import Router, File, Form
 from ninja.files import UploadedFile
 from functools import wraps
+import io
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 from .models import Libro
 from pagina.models import Pagina
@@ -303,6 +306,134 @@ def get_libro(request, libro_id: int):
         pendiente_leer=pendiente_leer,
         calificacion_promedio=calificacion_promedio,
     )
+@router.get("/{libro_id}/paginas")
+def list_paginas_by_libro(request, libro_id: int):
+    get_object_or_404(Libro, id=libro_id)
+    paginas = Pagina.objects.filter(libro_id=libro_id).order_by("id")
+    return [
+        {
+            "id": p.id,
+            "contenido": p.contenido,
+            "tipo": p.tipo,
+            "titulo": p.titulo,
+            "libro_id": p.libro_id,
+            "created_at": p.created_at,
+            "updated_at": p.updated_at,
+        }
+        for p in paginas
+    ]
+
+
+@router.get("/favoritos/list", response=List[LibroOut], auth=token_auth)
+def list_favoritos(request):
+    """Obtiene todos los libros favoritos del usuario"""
+    usuario_id = request.auth.get('uid')
+    if not usuario_id:
+        return HttpResponse("No autenticado", status=401)
+    
+    # Obtener acciones de usuario donde es_favorito=True
+    acciones = (
+        Acciones_usuario.objects
+        .select_related("libro", "libro__genero", "libro__usuario")
+        .filter(usuario_id=usuario_id, es_favorito=True)
+        .order_by("-updated_at")
+    )
+    
+    result = []
+    for accion in acciones:
+        libro = accion.libro
+        # Verificar que el libro es público o el usuario es el autor
+        if libro.es_publico or libro.usuario_id == usuario_id:
+            total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
+            ultima_pagina_leida_id = accion.ultima_pagina_leida_id
+            ultima_pagina_leida = obtener_numero_pagina_por_id(libro.id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None
+            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 and ultima_pagina_leida else False
+            calificacion_promedio = calcular_calificacion_promedio(libro.id)
+            
+            result.append(
+                LibroOut(
+                    id=libro.id,
+                    nombre=libro.nombre,
+                    version=libro.version,
+                    genero_id=libro.genero_id,
+                    genero=(libro.genero.genero if libro.genero_id else None),
+                    color_portada=libro.color_portada,
+                    imagen_portada=libro.imagen_portada.url if libro.imagen_portada else None,
+                    es_publico=libro.es_publico,
+                    usuario_id=libro.usuario_id,
+                    autor=libro.usuario.nombre_completo,
+                    created_at=libro.created_at,
+                    updated_at=libro.updated_at,
+                    ultima_pagina_leida=ultima_pagina_leida,
+                    ultima_pagina_leida_id=ultima_pagina_leida_id,
+                    esta_terminado=esta_terminado,
+                    total_paginas=total_paginas,
+                    es_favorito=accion.es_favorito,
+                    pendiente_leer=accion.pendiente_leer,
+                    calificacion_promedio=calificacion_promedio,
+                )
+            )
+    return result
+
+
+@router.get("/{libro_id}/download_pdf")
+def download_libro_pdf(request, libro_id: int):
+    """Descarga el libro como PDF, con cada página del libro como una página separada en el PDF"""
+    libro = get_object_or_404(Libro.objects.select_related("usuario"), id=libro_id)
+    
+    # Verificar permisos: solo mostrar si es público o si el usuario es el autor
+    usuario_id = None
+    if hasattr(request, 'auth') and request.auth:
+        usuario_id = request.auth.get('uid')
+    
+    if not libro.es_publico and (not usuario_id or libro.usuario_id != usuario_id):
+        return HttpResponse("No tienes permisos para descargar este libro", status=403)
+    
+    # Obtener páginas del libro
+    paginas = Pagina.objects.filter(libro_id=libro_id).order_by('id')
+    
+    # Generar PDF
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+    y = 750  # Posición inicial en la página
+    
+    # Título del libro en la primera página
+    p.drawString(100, y, f"Libro: {libro.nombre}")
+    y -= 30
+    p.drawString(100, y, f"Autor: {libro.usuario.nombre_completo}")
+    y -= 30
+    
+    for pagina in paginas:
+        # Agregar espacio antes de la nueva página del libro
+        if y < 100:  # Si queda poco espacio, pasar a nueva página del PDF
+            p.showPage()
+            y = 750
+        
+        # Título de la página
+        if pagina.titulo:
+            p.drawString(100, y, f"Página: {pagina.titulo}")
+            y -= 20
+        
+        # Contenido de la página
+        lines = pagina.contenido.split('\n')
+        for line in lines:
+            if y < 50:  # Nueva página del PDF si no hay espacio
+                p.showPage()
+                y = 750
+            p.drawString(100, y, line)
+            y -= 15
+        
+        # Finalizar la página del PDF después de cada página del libro
+        p.showPage()
+        y = 750  # Reiniciar posición para la siguiente página del PDF
+    
+    p.save()
+    buffer.seek(0)
+    
+    # Crear respuesta HTTP con el PDF
+    response = HttpResponse(buffer, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{libro.nombre}.pdf"'
+    return response
 
 
 @router.post("/", response=LibroOut, auth=token_auth)
@@ -455,123 +586,3 @@ def delete_libro(request, libro_id: int):
     return {"success": True}
 
 
-@router.get("/{libro_id}/paginas")
-def list_paginas_by_libro(request, libro_id: int):
-    get_object_or_404(Libro, id=libro_id)
-    paginas = Pagina.objects.filter(libro_id=libro_id).order_by("id")
-    return [
-        {
-            "id": p.id,
-            "contenido": p.contenido,
-            "tipo": p.tipo,
-            "titulo": p.titulo,
-            "libro_id": p.libro_id,
-            "created_at": p.created_at,
-            "updated_at": p.updated_at,
-        }
-        for p in paginas
-    ]
-
-
-@router.get("/favoritos/list", response=List[LibroOut], auth=token_auth)
-def list_favoritos(request):
-    """Obtiene todos los libros favoritos del usuario"""
-    usuario_id = request.auth.get('uid')
-    if not usuario_id:
-        return HttpResponse("No autenticado", status=401)
-    
-    # Obtener acciones de usuario donde es_favorito=True
-    acciones = (
-        Acciones_usuario.objects
-        .select_related("libro", "libro__genero", "libro__usuario")
-        .filter(usuario_id=usuario_id, es_favorito=True)
-        .order_by("-updated_at")
-    )
-    
-    result = []
-    for accion in acciones:
-        libro = accion.libro
-        # Verificar que el libro es público o el usuario es el autor
-        if libro.es_publico or libro.usuario_id == usuario_id:
-            total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
-            ultima_pagina_leida_id = accion.ultima_pagina_leida_id
-            ultima_pagina_leida = obtener_numero_pagina_por_id(libro.id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None
-            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 and ultima_pagina_leida else False
-            calificacion_promedio = calcular_calificacion_promedio(libro.id)
-            
-            result.append(
-                LibroOut(
-                    id=libro.id,
-                    nombre=libro.nombre,
-                    version=libro.version,
-                    genero_id=libro.genero_id,
-                    genero=(libro.genero.genero if libro.genero_id else None),
-                    color_portada=libro.color_portada,
-                    imagen_portada=libro.imagen_portada.url if libro.imagen_portada else None,
-                    es_publico=libro.es_publico,
-                    usuario_id=libro.usuario_id,
-                    autor=libro.usuario.nombre_completo,
-                    created_at=libro.created_at,
-                    updated_at=libro.updated_at,
-                    ultima_pagina_leida=ultima_pagina_leida,
-                    ultima_pagina_leida_id=ultima_pagina_leida_id,
-                    esta_terminado=esta_terminado,
-                    total_paginas=total_paginas,
-                    es_favorito=accion.es_favorito,
-                    pendiente_leer=accion.pendiente_leer,
-                    calificacion_promedio=calificacion_promedio,
-                )
-            )
-    return result
-
-
-@router.get("/pendientes/list", response=List[LibroOut], auth=token_auth)
-def list_pendientes(request):
-    """Obtiene todos los libros pendientes de leer del usuario"""
-    usuario_id = request.auth.get('uid')
-    if not usuario_id:
-        return HttpResponse("No autenticado", status=401)
-    
-    # Obtener acciones de usuario donde pendiente_leer=True
-    acciones = (
-        Acciones_usuario.objects
-        .select_related("libro", "libro__genero", "libro__usuario")
-        .filter(usuario_id=usuario_id, pendiente_leer=True)
-        .order_by("-updated_at")
-    )
-    
-    result = []
-    for accion in acciones:
-        libro = accion.libro
-        # Verificar que el libro es público o el usuario es el autor
-        if libro.es_publico or libro.usuario_id == usuario_id:
-            total_paginas = Pagina.objects.filter(libro_id=libro.id).count()
-            ultima_pagina_leida_id = accion.ultima_pagina_leida_id
-            ultima_pagina_leida = obtener_numero_pagina_por_id(libro.id, accion.ultima_pagina_leida_id) if accion.ultima_pagina_leida_id else None
-            esta_terminado = ultima_pagina_leida >= total_paginas if total_paginas > 0 and ultima_pagina_leida else False
-            calificacion_promedio = calcular_calificacion_promedio(libro.id)
-            
-            result.append(
-                LibroOut(
-                    id=libro.id,
-                    nombre=libro.nombre,
-                    version=libro.version,
-                    genero_id=libro.genero_id,
-                    genero=(libro.genero.genero if libro.genero_id else None),
-                    color_portada=libro.color_portada,
-                    imagen_portada=libro.imagen_portada.url if libro.imagen_portada else None,
-                    es_publico=libro.es_publico,
-                    usuario_id=libro.usuario_id,
-                    autor=libro.usuario.nombre_completo,
-                    created_at=libro.created_at,
-                    updated_at=libro.updated_at,
-                    ultima_pagina_leida=ultima_pagina_leida,
-                    ultima_pagina_leida_id=ultima_pagina_leida_id,
-                    esta_terminado=esta_terminado,
-                    total_paginas=total_paginas,
-                    es_favorito=accion.es_favorito,
-                    pendiente_leer=accion.pendiente_leer,
-                    calificacion_promedio=calificacion_promedio,
-                )
-            )
-    return result
