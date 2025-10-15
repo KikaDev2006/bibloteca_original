@@ -74,36 +74,6 @@ def logout(request):
     # Aquí solo confirmamos que el token es válido
     return {"success": True, "message": "Logout exitoso"}
 
-
-@router.put("/{usuario_id}", response=UsuarioOut, auth=token_auth)
-def update_usuario(request, usuario_id: int, payload: UsuarioUpdate):
-    usuario = get_object_or_404(Usuario, id=usuario_id)
-    
-    # Solo actualizar los campos que se proporcionan
-    update_data = payload.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(usuario, field, value)
-    
-    usuario.save()
-    usuario.refresh_from_db()
-    
-    return UsuarioOut(
-        id=usuario.id,
-        nombre_completo=usuario.nombre_completo,
-        email=usuario.email,
-        created_at=usuario.created_at,
-        updated_at=usuario.updated_at,
-    )
-
-
-@router.delete("/{usuario_id}", auth=token_auth)
-def delete_usuario(request, usuario_id: int):
-    usuario = get_object_or_404(Usuario, id=usuario_id)
-    usuario.delete()
-    return {"success": True}
-
-
-
 @router.post("/crear-superusuario", response={200: SuperUsuarioResponse, 403: SuperUsuarioResponse})
 def crear_superusuario(request, payload: SuperUsuarioIn):
     """
@@ -153,3 +123,36 @@ def crear_superusuario(request, payload: SuperUsuarioIn):
             success=False,
             message=f"Error al crear superusuario: {str(e)}"
         )
+
+
+
+@router.put("/{usuario_id}", response=UsuarioOut, auth=token_auth)
+def update_usuario(request, usuario_id: int, payload: UsuarioUpdate):
+    usuario = get_object_or_404(Usuario, id=usuario_id)
+    
+    # Solo actualizar los campos que se proporcionan
+    update_data = payload.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(usuario, field, value)
+    
+    usuario.save()
+    usuario.refresh_from_db()
+    
+    return UsuarioOut(
+        id=usuario.id,
+        nombre_completo=usuario.nombre_completo,
+        email=usuario.email,
+        created_at=usuario.created_at,
+        updated_at=usuario.updated_at,
+    )
+
+
+@router.delete("/{usuario_id}", auth=token_auth)
+def delete_usuario(request, usuario_id: int):
+    usuario = get_object_or_404(Usuario, id=usuario_id)
+    usuario.delete()
+    return {"success": True}
+
+
+
+
