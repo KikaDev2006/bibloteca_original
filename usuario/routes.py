@@ -109,8 +109,13 @@ def crear_superusuario(request, payload: SuperUsuarioIn):
     """
     Crea un superusuario solo si no existe ninguno en el sistema.
     """
+    print(f"🔍 DEBUG: Método recibido: {request.method}")
+    print(f"🔍 DEBUG: Path: {request.path}")
+    print(f"🔍 DEBUG: Payload: {payload}")
+
     # Verificar si ya existe un superusuario
     if User.objects.filter(is_superuser=True).exists():
+        print("🔍 DEBUG: Ya existe un superusuario")
         return 403, {
             "success": False,
             "message": "Ya existe un superusuario en el sistema"
@@ -118,6 +123,7 @@ def crear_superusuario(request, payload: SuperUsuarioIn):
 
     # Crear el superusuario
     try:
+        print(f"🔍 DEBUG: Creando superusuario para {payload.email}")
         superusuario = User.objects.create_user(
             username=payload.email,  # Usamos email como username
             email=payload.email,
@@ -129,6 +135,7 @@ def crear_superusuario(request, payload: SuperUsuarioIn):
         superusuario.is_staff = True
         superusuario.save()
 
+        print(f"🔍 DEBUG: Superusuario creado exitosamente: {superusuario.username}")
         return 200, {
             "success": True,
             "message": f"Superusuario {superusuario.username} creado exitosamente",
@@ -141,6 +148,7 @@ def crear_superusuario(request, payload: SuperUsuarioIn):
             }
         }
     except Exception as e:
+        print(f"🔍 DEBUG: Error al crear superusuario: {str(e)}")
         return 200, {
             "success": False,
             "message": f"Error al crear superusuario: {str(e)}"
