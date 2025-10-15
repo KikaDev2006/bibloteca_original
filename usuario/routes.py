@@ -6,7 +6,7 @@ from django.core import signing
 from ninja import Router
 
 from .models import Usuario
-from .schemas import UsuarioIn, UsuarioOut, UsuarioUpdate, LoginIn, LoginOut, SuperUsuarioIn
+from .schemas import UsuarioIn, UsuarioOut, UsuarioUpdate, LoginIn, LoginOut, SuperUsuarioIn, SuperUsuarioResponse
 from .auth import token_auth
 
 
@@ -104,7 +104,7 @@ def delete_usuario(request, usuario_id: int):
 
 
 
-@router.post("/crear-superusuario", response={200: dict, 403: dict})
+@router.post("/crear-superusuario", response={200: SuperUsuarioResponse, 403: SuperUsuarioResponse})
 def crear_superusuario(request, payload: SuperUsuarioIn):
     """
     Crea un superusuario solo si no existe ninguno en el sistema.
@@ -116,10 +116,10 @@ def crear_superusuario(request, payload: SuperUsuarioIn):
     # Verificar si ya existe un superusuario
     if User.objects.filter(is_superuser=True).exists():
         print("🔍 DEBUG: Ya existe un superusuario")
-        return 403, {
-            "success": False,
-            "message": "Ya existe un superusuario en el sistema"
-        }
+        return 403, SuperUsuarioResponse(
+            success=False,
+            message="Ya existe un superusuario en el sistema"
+        )
 
     # Crear el superusuario
     try:
@@ -136,20 +136,20 @@ def crear_superusuario(request, payload: SuperUsuarioIn):
         superusuario.save()
 
         print(f"🔍 DEBUG: Superusuario creado exitosamente: {superusuario.username}")
-        return 200, {
-            "success": True,
-            "message": f"Superusuario {superusuario.username} creado exitosamente",
-            "usuario": {
+        return 200, SuperUsuarioResponse(
+            success=True,
+            message=f"Superusuario {superusuario.username} creado exitosamente",
+            usuario={
                 "id": superusuario.id,
                 "username": superusuario.username,
                 "email": superusuario.email,
                 "is_superuser": superusuario.is_superuser,
                 "is_staff": superusuario.is_staff
             }
-        }
+        )
     except Exception as e:
         print(f"🔍 DEBUG: Error al crear superusuario: {str(e)}")
-        return 200, {
-            "success": False,
-            "message": f"Error al crear superusuario: {str(e)}"
-        }
+        return 200, SuperUsuarioResponse(
+            success=False,
+            message=f"Error al crear superusuario: {str(e)}"
+        )

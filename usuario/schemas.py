@@ -28,6 +28,12 @@ class SuperUsuarioIn(Schema):
     contraseña: str
 
 
+class SuperUsuarioResponse(Schema):
+    success: bool
+    message: str
+    usuario: dict = None
+
+
 class LoginIn(Schema):
     email: str
     contraseña: str
