@@ -52,11 +52,12 @@ else:
     ALLOWED_HOSTS = ['bibloteca-original.onrender.com', 'www.bibloteca-original.onrender.com']
 
 # CSRF Trusted Origins configuration
-if not DEBUG:
-    CSRF_TRUSTED_ORIGINS = [
-        'https://bibloteca-original.onrender.com',
-        'https://www.bibloteca-original.onrender.com',
-    ]
+CSRF_TRUSTED_ORIGINS = [
+    'https://bibloteca-original.onrender.com',
+    'https://www.bibloteca-original.onrender.com',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
 
 
 # Application definition
